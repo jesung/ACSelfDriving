@@ -28,6 +28,7 @@ class WindowCapture:
         if window_name is None:
             self.hwnd = win32gui.GetDesktopWindow()
         else:
+            # AC unfortunately returns black screen
             self.hwnd = win32gui.FindWindow(None, window_name)
             if not self.hwnd:
                 raise Exception('Window not found: {}'.format(window_name))
@@ -54,7 +55,7 @@ class WindowCapture:
         self.mon = {"top": self.offset_y, "left": self.offset_x, "width": self.w, "height": self.h}
         self.sct = mss.mss()
 
-    # ~30 fps
+    # ~30 fps; speed up by capturing a section of the screen directly instead of from window
     def get_screenshot_mss(self):
         screenshot = np.asarray(self.sct.grab(self.mon))
 
@@ -68,7 +69,6 @@ class WindowCapture:
         return screenshot
 
     def get_screenshot(self):
-
         # get the window image data
         wDC = win32gui.GetWindowDC(self.hwnd)
         dcObj = win32ui.CreateDCFromHandle(wDC)
@@ -103,7 +103,7 @@ class WindowCapture:
         #img = np.ascontiguousarray(img)
 
         #return img
-        return np.ascontiguousarray(img[...,:3])
+        return np.ascontiguousarray(img[..., :3])
 
     # find the name of the window you're interested in.
     # once you have it, update window_capture()
