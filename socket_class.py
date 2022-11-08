@@ -9,7 +9,7 @@ class ACSocket:
     addr = None
     data = None
 
-    def __init__(self, host="127.0.0.1", port=65431):
+    def __init__(self, host, port):
         # Host: Standard loopback interface address (localhost)
         # Post: Port to listen on (non-privileged ports are > 1023)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -23,8 +23,8 @@ class ACSocket:
     def update(self):
         try:
             self.data = self.conn.recv(1024)
-            #print(f"Received: {self.data}")
-            #self.conn.sendall(self.data)
+            # print(f"Received: {self.data}")
+            # self.conn.sendall(self.data)
         except:
             print("Didn't receive data")
 
