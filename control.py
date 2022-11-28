@@ -3,6 +3,7 @@ import os
 import numpy as np
 import vgamepad as vg
 import time
+import math
 
 
 def get_time():
@@ -21,6 +22,39 @@ def find_closest_waypoint(waypoints, car_location):
             min_index = i
 
     return min_index, min_distance
+
+
+def distance(a, b):
+    return math.sqrt(np.sum(np.square(np.subtract(a, b))))
+
+
+def curvature(a, b, c):
+    A = np.sum(np.square(np.subtract(b, c)))
+    B = np.sum(np.square(np.subtract(a, c)))
+    C = np.sum(np.square(np.subtract(a, b)))
+    return math.sqrt(4 * A * B - (A + B - C)**2)/4 / (distance(a, b) * distance(b, c) * distance(a, c))
+
+
+def max_velocity(curvature, max_lat_acc):
+    return math.sqrt(max_lat_acc / curvature)
+
+
+def speed_target(target_line, max_lat_acc):
+    length = target_line.shape[0]
+    target = []
+    curv = []
+    for i in range(length):
+        curv.append(curvature(target_line[(i - 1) % length], target_line[i], target_line[(i + 1) % length]))
+        target.append(max_velocity(curv[i], max_lat_acc))
+
+    for i in range(length - 1, -1, -1):
+        if target[(i - 1) % length] > target[i % length]:
+            available_long_acc = (max_lat_acc - target[i % length]**2 * curv[(i - 1) % length]) / 2
+            angle = 180 - 2 * np.cos(distance(target_line[(i - 2) % length], target_line[i]) / 2 * curv[(i - 1) % length])
+            travel_dist = 2 * np.pi / curv[(i - 1) % length] * angle / 360
+            target[(i - 1) % length] = math.sqrt(target[i]**2 + 2 * available_long_acc * travel_dist)
+
+    return np.minimum(250, np.multiply(3.6, target)) # convert to km/h
 
 
 class Controller:
@@ -168,11 +202,12 @@ class Controller:
 
     def compute_v_desired(self, waypoints):
         # refactor
-        new_waypoints = np.ones(waypoints.shape[0]) * 200
-        new_waypoints[95:200] = 75
-        new_waypoints[375:500] = 85
-        new_waypoints[500:600] = 100
-        new_waypoints[960:1060] = 105
-        new_waypoints[1135:1180] = 92
+        # new_waypoints = np.ones(waypoints.shape[0]) * 200
+        # new_waypoints[95:200] = 75
+        # new_waypoints[375:500] = 85
+        # new_waypoints[500:600] = 100
+        # new_waypoints[960:1060] = 105
+        # new_waypoints[1135:1180] = 92
+        target = speed_target(waypoints, 1.6)
 
-        return new_waypoints
+        return target
