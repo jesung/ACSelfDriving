@@ -14,7 +14,7 @@ class CarState:
 
     def update(self, socket_data):
         # cutting off at five columns allows for overflow of data
-        x, y, z, self.heading, self.speed = [float(i) for i in socket_data.decode('utf8').split(',')[:5]]
+        x, y, z, self.heading, self.speed = [float(i) if i != '' else 0 for i in socket_data.decode('utf8').split(',')[:5]]
 
         # to-do: include code to pull other car and environment state data (e.g., hp & torque, tire, weather)
 

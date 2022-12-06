@@ -4,6 +4,7 @@ import numpy as np
 import vgamepad as vg
 import time
 import math
+import scipy.constants
 
 
 def get_time():
@@ -15,10 +16,10 @@ def find_closest_waypoint(waypoints, car_location):
     min_index = 0
 
     for i in range(waypoints.shape[0]):
-        distance = np.linalg.norm(waypoints[i, :3] - car_location[:3])
+        point_distance = np.linalg.norm(waypoints[i, :3] - car_location[:3])
 
-        if distance < min_distance:
-            min_distance = distance
+        if point_distance < min_distance:
+            min_distance = point_distance
             min_index = i
 
     return min_index, min_distance
@@ -29,32 +30,39 @@ def distance(a, b):
 
 
 def curvature(a, b, c):
-    A = np.sum(np.square(np.subtract(b, c)))
-    B = np.sum(np.square(np.subtract(a, c)))
-    C = np.sum(np.square(np.subtract(a, b)))
-    return math.sqrt(4 * A * B - (A + B - C)**2)/4 / (distance(a, b) * distance(b, c) * distance(a, c))
+    v1 = a - b
+    v2 = a - c
+    return 2 * math.sqrt((v1[1]*v2[2] - v1[2]*v2[1])**2 +
+             (v1[2]*v2[0] - v1[0]*v2[2])**2 +
+             (v1[0]*v2[1] - v1[1]*v2[0])**2) / (distance(a, b) * distance(b, c) * distance(a, c))
 
 
-def max_velocity(curvature, max_lat_acc):
-    return math.sqrt(max_lat_acc / curvature)
+def max_velocity(curv, max_lat_acc):
+    return math.sqrt(max_lat_acc * scipy.constants.g / curv)
 
 
 def speed_target(target_line, max_lat_acc):
     length = target_line.shape[0]
     target = []
-    curv = []
+    curv = []       # store the curvature at each point in the target line
+
+    # compute the curvature and therefore the maximum velocity that can be taken at each set of three consecutive points
     for i in range(length):
         curv.append(curvature(target_line[(i - 1) % length], target_line[i], target_line[(i + 1) % length]))
         target.append(max_velocity(curv[i], max_lat_acc))
 
+    # forward pass to limit acceleration profile
+    # TO-DO
+
+    # backward pass to limit deceleration profile
     for i in range(length - 1, -1, -1):
         if target[(i - 1) % length] > target[i % length]:
-            available_long_acc = (max_lat_acc - target[i % length]**2 * curv[(i - 1) % length]) / 2
-            angle = 180 - 2 * np.cos(distance(target_line[(i - 2) % length], target_line[i]) / 2 * curv[(i - 1) % length])
-            travel_dist = 2 * np.pi / curv[(i - 1) % length] * angle / 360
-            target[(i - 1) % length] = math.sqrt(target[i]**2 + 2 * available_long_acc * travel_dist)
+            available_long_acc = max_lat_acc * scipy.constants.g - target[i % length]**2 * curv[(i - 1) % length]
+            angle = 2 * np.arcsin(distance(target_line[(i - 2) % length], target_line[i]) / 2 * curv[(i - 1) % length])
+            travel_dist = angle / curv[(i - 1) % length]
+            target[(i - 1) % length] = math.sqrt(target[i]**2 + available_long_acc * travel_dist)
 
-    return np.minimum(250, np.multiply(3.6, target)) # convert to km/h
+    return np.minimum(350, np.multiply(3.6, target)) # convert to km/h
 
 
 class Controller:
@@ -82,6 +90,7 @@ class Controller:
         # self.waypoints = self.compute_v_desired(self.pit_lane)
         self.gamepad = vg.VX360Gamepad()
 
+        # press and release a button to have the controller be recognized
         self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
         self.gamepad.update()
         time.sleep(0.5)
@@ -111,13 +120,15 @@ class Controller:
             self.right = np.array([float(i) for row in reader for i in row]).reshape((-1, 3))
 
     def set_controller(self):
+        """
+        Sets and updates the controller values based on the target throttle, brake, and steer values
+        """
         # print(f"Throttle: {self.target_throttle}\t Brake: {self.target_brake}\t Steer: {self.target_steer}")
         self.gamepad.right_trigger_float(value_float=self.target_throttle)  # value between 0 and 1
         self.gamepad.left_trigger_float(value_float=self.target_brake)  # value between 0 and 1
         self.gamepad.left_joystick_float(x_value_float=self.target_steer, y_value_float=0.0)  # range(-1, 1)  / np.pi
 
         self.gamepad.update()
-        # time.sleep(0.1)
 
     def update_target(self, car):
         # Longitudinal Controller
@@ -141,7 +152,7 @@ class Controller:
                 self.v_desired = self.compute_v_desired(self.fast_ai)
                 print("Changing mode to track")
         else:
-            lookahead_distance = 10
+            lookahead_distance = 16  # 17 for brz
             waypoints = self.fast_ai
             min_idx, _ = find_closest_waypoint(waypoints, car.location)
             target_velocity = self.v_desired[min_idx]  # update this to dynamic
@@ -160,6 +171,9 @@ class Controller:
         self.target_brake = -min(a, 0)
 
         self.target_throttle = max(min(self.target_throttle, 1.0), 0.0)
+        self.target_brake = max(min(self.target_brake, 1.0), 0.0)
+
+        print("Target speed:", target_velocity, "\tActual speed:", car.speed, "\tThrottle:", self.target_throttle, "\tBrake:", self.target_brake)
 
         # Lateral Controller
         # PID controller parameters
@@ -201,13 +215,6 @@ class Controller:
         self.set_controller()
 
     def compute_v_desired(self, waypoints):
-        # refactor
-        # new_waypoints = np.ones(waypoints.shape[0]) * 200
-        # new_waypoints[95:200] = 75
-        # new_waypoints[375:500] = 85
-        # new_waypoints[500:600] = 100
-        # new_waypoints[960:1060] = 105
-        # new_waypoints[1135:1180] = 92
-        target = speed_target(waypoints, 1.6)
+        target = speed_target(waypoints, 1.72)  # 1.32 for BRZ, 1.70 for Zonda
 
         return target
