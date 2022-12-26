@@ -5,17 +5,19 @@ from time import time
 # from windowcapture import WindowCapture
 from socket_class import ACSocket
 from control import Controller
-from car_state import CarState
+from vehicle import Vehicle
+from track import Track
+from path import Trajectory
 
 
-# get grayscale image
-def get_grayscale(image):
-    return cv.cvtColor(image, cv.COLOR_BGR2GRAY)
-
-
-# thresholding
-def thresholding(image):
-    return cv.threshold(image, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)[1]
+# # get grayscale image
+# def get_grayscale(image):
+#     return cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+#
+#
+# # thresholding
+# def thresholding(image):
+#     return cv.threshold(image, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)[1]
 
 
 def main():
@@ -36,8 +38,23 @@ def main():
 
     # load track and compute speed target at each point
     # optional: compute car maximum g
-    current_car_state = CarState()
-    cont = Controller(track='rbr_national')
+    track = Track('rbr_national')
+    vehicle = Vehicle()
+    trajectory = Trajectory(track, vehicle)
+
+    # run_time = trajectory.minimise_lap_time()
+    run_time = trajectory.minimise_curvature()
+    print("[ Computing lap time ]")
+    trajectory.update_velocity()
+    lap_time = trajectory.lap_time()
+
+    print()
+    print("=== Results ==========================================================")
+    print("Lap time = {:.3f}".format(lap_time))
+    print("Run time = {:.3f}".format(run_time))
+    print("======================================================================")
+    print()
+    cont = Controller(path=trajectory.path.position(trajectory.s)[:, :-1], velocity=trajectory.velocity.v)
 
     print("Starting loop")
 
@@ -53,10 +70,12 @@ def main():
 
         # get game state from socket connection
         sock.update()
-        current_car_state.update(sock.data)  # pass on data from socket to update car's current state
+        vehicle.update(sock.data)  # pass on data from socket to update car's current state
+        # print(vehicle)
+        # update vehicle parameters here
 
         # compute target controls and update gamepad
-        cont.update_target(current_car_state)
+        cont.update_target(vehicle)
 
         # press 'q' with the output window focused to exit.
         # waits 1 ms every loop to process key presses
