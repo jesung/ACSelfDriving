@@ -1,17 +1,6 @@
 import numpy as np
 from scipy.interpolate import splev, splprep
-import math
-import numpy as np
-import os
-import time
-from functools import partial
-from multiprocessing import Pool
-# from plot import plot_path
-from scipy.optimize import Bounds, minimize, minimize_scalar
-# from track import Track
-# from utils import define_corners, idx_modulo
-from velocity import VelocityProfile
-import scipy.constants
+
 
 # # old code
 # def distance(a, b):
@@ -68,6 +57,27 @@ import scipy.constants
 #     return np.minimum(350, np.multiply(3.6, target))  # convert to km/h
 
 
+def compute_long_angle(position):
+    """
+    Returns the longitudinal angle (pitch) of the track. Negative values
+    means that the track is going downhill.
+    """
+    # if self.closed:
+    #     position = np.concatenate((position, position[:, 0].reshape((3, 1))), axis=1)
+    # note that y-axis is vertical and is flipped (negative is up)
+    offset = np.roll(position, -1, axis=1)  # np.append(position[:, 1:], position[:, 0], axis=1) #
+    diff = offset - position
+    # calculate angle
+    angle_long = np.arctan(np.divide(-diff[1, :], np.linalg.norm(diff[[0, 2], :], axis=0)))
+    return angle_long
+
+
+def cumulative_distances(points):
+    """Returns the cumulative linear distance at each point."""
+    d = np.cumsum(np.linalg.norm(np.diff(points, axis=1), axis=0))
+    return np.append(0, d)
+
+
 class Path:
     """
     Wrapper for scipy.interpolate.BSpline.
@@ -76,11 +86,9 @@ class Path:
 
     def __init__(self, controls, closed=True):
         """Construct a spline through the given control points."""
-        # self.controls = controls.transpose()
         self.controls = controls
         self.closed = closed
         self.dists = cumulative_distances(self.controls)
-        # print(self.dists)
         self.spline, _ = splprep(self.controls, u=self.dists, k=3, s=0, per=self.closed)
         self.length = self.dists[-1]
 
@@ -100,7 +108,8 @@ class Path:
 
     def gamma2(self, s=None):
         """Returns the sum of the squares of sample curvatures, Gamma^2."""
-        if s is None: s = self.dists
+        if s is None:
+            s = self.dists
         ddx, ddy, ddz = splev(s, self.spline, 2)
         return np.sum(ddx**2 + ddy**2 + ddz**2)
 
@@ -108,160 +117,3 @@ class Path:
     #     target = speed_target(waypoints, vehicle.tire_coefficient)  # 1.32 for BRZ, 1.70 for Zonda
     #     return target
 
-
-class Trajectory:
-    """
-    Stores the geometry and dynamics of a path, handling optimisation of the
-    racing line. Samples are taken every metre.
-    """
-
-    def __init__(self, track, vehicle=None):
-        """Store track and vehicle and initialise a centerline path."""
-        self.s = None
-        self.velocity = None
-        self.path = None
-        self.track = track
-        self.ns = math.ceil(track.length)
-        self.alphas = np.full(track.size, 0.5)
-        self.update(self.alphas)       # turn alphas into function param & pass on results for max curvature
-        self.vehicle = vehicle
-
-    def update(self, alphas):
-        """Update control points and the resulting path."""
-        self.alphas = alphas
-        self.path = Path(self.track.control_points(alphas), self.track.closed)
-        # Sample every metre
-        self.s = np.linspace(0, self.path.length, self.ns)
-        # self.s = np.linspace(0, self.path.length, math.ceil(self.track.size))
-
-    def update_velocity(self):
-        """Generate a new velocity profile for the current path."""
-        s = self.s[:-1]
-        s_max = self.path.length if self.track.closed else None
-        k = self.path.curvature(s)
-        self.velocity = VelocityProfile(self.vehicle, s, k, s_max)
-
-    def lap_time(self):
-        """Calculate lap time from the velocity profile."""
-        return np.sum(np.diff(self.s) / self.velocity.v)
-
-    def minimise_curvature(self):
-        """Generate a path minimising curvature."""
-
-        def objfun(alphas):
-            self.update(alphas)
-            return self.path.gamma2(self.s)
-
-        t0 = time.time()
-        res = minimize(
-            fun=objfun,
-            x0=np.full(self.track.size, 0.5),
-            method='L-BFGS-B',
-            bounds=Bounds(0.0, 1.0),
-            options={'maxfun': 1000000, 'maxiter': 1000000, 'gtol': 1e-09}
-        )
-        self.update(res.x)
-        return time.time() - t0
-
-    def minimise_compromise(self, eps):
-        """
-        Generate a path minimising a compromise between path curvature and path
-        length. eps gives the weight for path length.
-        """
-
-        def objfun(alphas):
-            self.update(alphas)
-            k = self.path.gamma2(self.s)
-            d = self.path.length
-            return (1 - eps) * k + eps * d
-
-        t0 = time.time()
-        res = minimize(
-            fun=objfun,
-            x0=np.full(self.track.size, 0.5),
-            method='L-BFGS-B',
-            bounds=Bounds(0.0, 1.0)
-        )
-        self.update(res.x)
-        return time.time() - t0
-
-    def minimise_optimal_compromise(self, eps_min=0, eps_max=0.2):
-        """
-        Determine the optimal compromise weight when using optimise_compromise to
-        produce a path.
-        """
-
-        def objfun(eps):
-            self.minimise_compromise(eps)
-            self.update_velocity()
-            t = self.lap_time()
-            if self.epsilon_history.size > 0:
-                self.epsilon_history = np.vstack((self.epsilon_history, [eps, t]))
-            else:
-                self.epsilon_history = np.array([eps, t])
-            return t
-
-        self.epsilon_history = np.array([])
-        t0 = time.time()
-        res = minimize_scalar(
-            fun=objfun,
-            method='bounded',
-            bounds=(eps_min, eps_max)
-        )
-        self.epsilon = res.x
-        self.minimise_compromise(self.epsilon)
-        end = time.time()
-        return end - t0
-
-    def minimise_lap_time(self):
-        """
-        Generate a path that directly minimises lap time.
-        """
-
-        def objfun(alphas):
-            self.update(alphas)
-            self.update_velocity()
-            return self.lap_time()
-
-        t0 = time.time()
-        res = minimize(
-            fun=objfun,
-            x0=np.full(self.track.size, 0.5),
-            method='L-BFGS-B',
-            bounds=Bounds(0.0, 1.0),
-            options={'maxfun': 100000, 'maxiter': 100000, 'maxls': 100, 'gtol': 1e-07}
-        )
-        self.update(res.x)
-        return time.time() - t0
-
-    # def optimise_sectors(self, k_min, proximity, length):
-    #     """
-    #     Generate a path that optimises the path through each sector, and merges
-    #     the results along intervening straights.
-    #     """
-    #
-    #     # Define sectors
-    #     t0 = time.time()
-    #     corners, _ = self.track.corners(self.s, k_min, proximity, length)
-    #
-    #     # Optimise path for each sector in parallel
-    #     nc = corners.shape[0]
-    #     pool = Pool(os.cpu_count() - 1)
-    #     alphas = pool.map(
-    #         partial(optimise_sector_compromise, corners=corners, traj=self),
-    #         range(nc)
-    #     )
-    #     pool.close()
-    #
-    #     # Merge sectors and update trajectory
-    #     alphas = np.sum(alphas, axis=0)
-    #     self.update(alphas)
-    #     return time.time() - t0
-
-###############################################################################
-
-
-def cumulative_distances(points):
-    """Returns the cumulative linear distance at each point."""
-    d = np.cumsum(np.linalg.norm(np.diff(points, axis=1), axis=0))
-    return np.append(0, d)

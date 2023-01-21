@@ -3,6 +3,7 @@ import vgamepad as vg
 import time
 from track import Track
 
+
 def get_time():
     return time.time_ns() / 1000000000
 
@@ -35,19 +36,14 @@ class Controller:
     throttle_previous = 0
 
     def __init__(self, path, velocity):
-        # self.track = Track(track_name)
-        # self.waypoints = self.compute_v_desired(self.pit_lane)
         self.waypoints = path.transpose()
         self.v_desired = velocity * 3.6       # convert to km/h
         self.gamepad = vg.VX360Gamepad()
-        print(path)
-        print(velocity)
 
-        # press and release a button to have the controller be recognized
+        # press and release a button to have the controller be recognized by the game
         self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
         self.gamepad.update()
         time.sleep(0.5)
-
         self.gamepad.release_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
         self.gamepad.update()
         time.sleep(0.5)
@@ -85,7 +81,7 @@ class Controller:
         #         self.track.v_desired = self.track.compute_v_desired(self.track.fast_ai, vehicle)
         #         print("Changing mode to track")
         # else:
-        lookahead_distance = 5  # 17 for brz
+        lookahead_distance = 10 # 15  # 17 for brz
         # waypoints = self.track.fast_ai
         # min_idx, _ = find_closest_waypoint(self.waypoints, vehicle.location)
         # print(self.waypoints.shape)

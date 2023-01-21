@@ -1,13 +1,11 @@
 import os
-import csv
 import numpy as np
-import math
-import matplotlib.pyplot as plt
-from path import Path, Trajectory, cumulative_distances
-from vehicle import Vehicle
+from path import Path, cumulative_distances
+import ac_utils as ac
+# from utils import define_corners, idx_modulo, is_closed
 from scipy.interpolate import splev, splprep
 import sys
-
+import random
 
 class Track:
     left = None
@@ -16,94 +14,67 @@ class Track:
     fast_ai = None
     pit_lane = None
     v_desired = None
-    closed = True   # does the track loop?
+    closed = None   # does the track loop?
     diffs = None    # difference between left and right edges of track
     length = None
+    angle_lat = None
+    s = None
 
-    dir_name = os.path.dirname(__file__)
-    dir_name = os.path.join(dir_name, "content")
-
-    def __init__(self, track):
-        self.load_csv(track)
+    def __init__(self, track=None, closed=True):
+        self.closed = closed
+        self.left, self.right, self.fast_ai, self.pit_lane = ac.load_csv(track)
+        # s = np.sort(random.sample(range(self.left[0, :].size - int(self.closed)), 1000))
+        # self.left = self.left[:, s]
+        # self.right = self.right[:, s]
         self.diffs = self.right - self.left
+        # print(self.diffs)         # why is the diff along y-axis 0??
         self.size = self.left[0, :].size - int(self.closed)
         self.mid = Path(self.control_points(np.full(self.size, 0.5)), self.closed)
         self.length = self.mid.length
+        self.precompute_angle()
+        dir_name = os.path.dirname(__file__)
+        dir_name = os.path.join(dir_name, "content")
+        dir_name = os.path.join(dir_name, "tracks")
+        dir_name = os.path.join(dir_name, track)
+        self.dir_name = dir_name
 
-    def load_csv(self, track):
-        self.dir_name = os.path.join(self.dir_name, track)
-
-        # only read the first three columns of AI file
-        with open(os.path.join(self.dir_name, "fast_ai.csv"), "r") as f:
-            reader = csv.reader(f)
-            self.fast_ai = np.array([float(i) for row in reader for i in row[:3]]).reshape((-1, 3)).transpose()
-
-        with open(os.path.join(self.dir_name, "pit_lane.csv"), "r") as f:
-            reader = csv.reader(f)
-            self.pit_lane = np.array([float(i) for row in reader for i in row[:3]]).reshape((-1, 3)).transpose()
-
-        with open(os.path.join(self.dir_name, "left.csv")) as f:
-            reader = csv.reader(f)
-            self.left = np.array([float(i) for row in reader for i in row]).reshape((-1, 3)).transpose()
-
-        with open(os.path.join(self.dir_name, "right.csv")) as f:
-            reader = csv.reader(f)
-            self.right = np.array([float(i) for row in reader for i in row]).reshape((-1, 3)).transpose()
-
-    def control_points(self, alphas):
+    def control_points(self, alphas, sample=None):
         """Translate alpha values into control point coordinates"""
-        alphas = np.append(alphas, alphas[0])
+        if self.closed:
+            alphas = np.append(alphas, alphas[0])
+        if sample is None:
+            sample = range(alphas.shape[0])
         i = np.nonzero(alphas != -1)[0]
         return self.left[:, i] + (alphas[i] * self.diffs[:, i])
 
+    # def corners(self, s, k_min, proximity, length):
+    #     """Determine location of corners on this track."""
+    #     return define_corners(self.mid, s, k_min, proximity, length)
 
-if __name__ == "__main__":
-    track = Track('rbr_national')
-    vehicle = Vehicle()
-    trajectory = Trajectory(track, vehicle)
+    def precompute_angle(self):
+        """Sample track boundaries every meter and cache the lateral angle and
+        direction of turn at each step. This will be interpolated in compute_lat_angle"""
+        angles = np.arctan(np.divide(-self.diffs[1, :], np.linalg.norm(self.diffs[[0, 2], :], axis=0)))
 
-    # run_time = trajectory.minimise_lap_time()
-    run_time = trajectory.minimise_curvature()
+        # find direction of curvature. Note that y-axis is vertical and is flipped (negative is up)
+        left_diff = np.roll(self.left, -1, axis=1)[[0, 2], :] - self.left[[0, 2], :]
+        left_diff = left_diff / np.linalg.norm(left_diff, axis=0)   # normalize to unit vector
 
-    print("[ Computing lap time ]")
-    trajectory.update_velocity()
-    lap_time = trajectory.lap_time()
+        s = cumulative_distances(self.left)
+        left_spline, _ = splprep(self.left, u=s, k=3, s=0, per=self.closed)
+        x, y, z = splev(x=s, tck=left_spline, der=1)    # 1st derivative of left spline
+        left_der = np.array([x, z])
+        left_der = left_der / np.linalg.norm(left_der, axis=0)  # normalize to unit vector
 
-    print()
-    print("=== Results ==========================================================")
-    print("Lap time = {:.3f}".format(lap_time))
-    print("Run time = {:.3f}".format(run_time))
-    print("======================================================================")
-    print()
+        # compute the determinant and check for its sign
+        direction = np.multiply(left_diff[1, :], left_der[0, :]) - np.multiply(left_diff[0, :], left_der[1, :])
+        camber = [1 if val > 0 else -1 for val in direction]
+        self.angle_lat = np.array([s, angles, camber])
+        # print(angles)
 
-    dists_left = cumulative_distances(track.left)
-    spline_left, _ = splprep(track.left, u=dists_left, k=3, s=0, per=True)
-    x, y, z = splev(dists_left, spline_left)
-    position_left = np.array([x, y, z]).transpose()
+    def compute_lat_angle(self, sample):
+        """Interpolate the lat angle and direction of turn. Both values are pre-computed
+        for performance reasons. Should be fairly accurate if the optimization process is iterated."""
+        return np.array([[np.interp(s, self.angle_lat[0, :], self.angle_lat[1, :]),
+                          round(np.interp(s, self.angle_lat[0, :], self.angle_lat[2, :]))] for s in sample])
 
-    dists_right = cumulative_distances(track.right)
-    spline_right, _ = splprep(track.right, u=dists_right, k=3, s=0, per=True)
-    x, y, z = splev(dists_right, spline_right)
-    position_right = np.array([x, y, z]).transpose()
-
-    dists_mid = cumulative_distances(trajectory.path.controls)
-    spline_mid, _ = splprep(trajectory.path.controls, u=dists_mid, k=3, s=0, per=True)
-    x, y, z = splev(dists_mid, spline_mid)
-    position_mid = np.array([x, y, z]).transpose()
-
-    # save results into CSV
-    with open(os.path.join(track.dir_name, 'optimized.csv'), 'w') as f:
-        writer = csv.writer(f)
-        writer.writerow(trajectory.alphas)
-
-    fig = plt.figure()
-    ax = fig.add_subplot(projection='3d')
-    for color, var in [('red', position_left), ('blue', position_right), ('green', position_mid)]:
-    # for color, var in [('red', position_left), ('blue', position_right)]:
-        ax.scatter(var[:, 0], var[:, 1], var[:, 2], c=color)
-
-    ax.set_xlabel('X Label')
-    ax.set_ylabel('Y Label')
-    ax.set_zlabel('Z Label')
-
-    plt.show()
