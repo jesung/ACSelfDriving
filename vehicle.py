@@ -1,50 +1,66 @@
 import numpy as np
 import scipy.constants
-from math import sqrt
 import ac_utils as ac
 
 
 class Vehicle:
-    location = [0, 0, 0]
-    speed = 0
-    heading = 0
-    mass = None
-    engine_profile = None
-    tire_coefficient = None
+    """
+    Represents vehicle's static and dynamic attributes.
 
-    def __init__(self, name):
+    Static attributes such as mass, engine profile, and tire coefficient are assigned during initialization. Dynamic
+    attributes such as vehicle's position, heading, and speed are refreshed using self.update().
+
+    Attributes:
+        location (tuple): XYZ
+        speed (float): current speed of vehicle (m/s)
+        heading (float) current heading of vehicle
+        mass (float): mass of the vehicle in kg
+        engine_profile (np.ndarray): mapping of vehicle speed (m/s) to wheel force (N)
+        tire_coefficient (float): coefficient of friction of the driven wheel
+    """
+
+    location = [0.0, 0.0, 0.0]
+    speed = 0.0
+    heading = 0.0
+
+    def __init__(self, name: str) -> None:
         self.mass, self.tire_coefficient, self.engine_profile = ac.load_vehicle(name)
+        self.tire_coefficient *= 0.95       # allows car to follow the reference line better
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Overwrites print(vehicle) function."""
         return f"[X, Y, Z]: {self.location} \tHeading: {self.heading} \tSpeed: {self.speed}"
 
-    def update(self, socket_data):
-        ##############################################################
-        # TO-DO: update tire coefficient and engine profile
-        ##############################################################
-
+    def update(self, socket_data: bytes) -> None:
         # cutting off at five columns allows for overflow of data
-        x, y, z, self.heading, self.speed = [float(i) if i != '' else 0 for i in socket_data.decode('utf8').split(',')[:5]]
+        x, y, z, self.heading, self.speed = [float(i) if i != '' else 0 for i in
+                                             socket_data.decode('utf8').split(',')[:5]]
 
-        # to-do: include code to pull other car and environment state data (e.g., tire, weather)
-
-        # update location with flipped z-axis
+        # update location with flipped z-axis. Not sure why Kunos uses such odd axes between game and track map.
         self.location = np.array([x, y, -z])
 
-    def engine_force(self, velocity, gear=None):
-        """Map current velocity to force output by the engine."""
+    def engine_force(self, velocity: np.float64) -> np.float64:
+        """Interpolate current velocity to force output by the engine."""
+
         return np.interp(velocity, self.engine_profile[:, 0], self.engine_profile[:, 1])
 
-    def traction(self, velocity, curvature):
-        """Determine remaining traction when negotiating a corner."""
-        ##############################################################
+    def traction(self, velocity: np.float64, curvature: np.float64) -> np.float64:
+        """
+        Determine remaining traction when negotiating a corner.
+
+        This does not take into account for road camber which is accounted for during the velocity profile calculation.
+
+        Parameters:
+            velocity (np.float64): Instantaneous velocity of vehicle at a given position
+            curvature (np.float64): Instantaneous curvature of path at a given position
+
+        Returns:
+            Available longitudinal traction force given total available grip and instantaneous velocity and curvature.
+        """
+
         # TO-DO: update to account for different lateral & longitudinal mu
-        ##############################################################
         f = self.tire_coefficient * scipy.constants.g * self.mass
         f_lat = velocity ** 2 * curvature * self.mass
         if f <= f_lat:
-            ##############################################################
-            # TO-DO: update tire coefficient with changing track conditions
-            ##############################################################
-            return 0
-        return sqrt(f**2 - f_lat**2)
+            return np.float64(0.0)
+        return np.sqrt(f**2 - f_lat**2)

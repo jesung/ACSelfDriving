@@ -1,24 +1,38 @@
 import math
 import numpy as np
-# import os
 import time
+from scipy.optimize import Bounds, minimize, minimize_scalar
+from track import Track
+from velocity import VelocityProfile
+from path import Path, compute_long_angle
+from vehicle import Vehicle
 # from functools import partial
 # from multiprocessing import Pool
 # from plot import plot_path
-from scipy.optimize import Bounds, minimize, minimize_scalar
-from track import Track
 # from utils import define_corners, idx_modulo
-from velocity import VelocityProfile
-from path import Path, compute_long_angle
 
 
 class Trajectory:
     """
-    Stores the geometry and dynamics of a path, handling optimisation of the
-    racing line. Samples are taken every metre.
+    Stores the geometry and dynamics of a path, handling optimisation of the racing line.
+
+    Samples are taken approximately every meter.
+
+    Attributes:
+        s (np.ndarray): sampled path interval
+        velocity (VelocityProfile): Generate and store a velocity profile for a given path and vehicle.
+        path (Path): Spline based on provided waypoints using scipy package.
+        angle_long (np.ndarray): Longitudinal angle (pitch) of the track.
+        angle_lat (np.ndarray): interpolated lateral angle and direction of turn
+        track (Track): Represents track's boundaries and its associated attributes.
+        alphas (np.ndarray): set of relative positions (0 corresponds to left boundary, 1 to the right) that defines
+                             a path to be optimized.
+        vehicle (Vehicle): Represents vehicle's static and dynamic attributes.
+        bounds (scipy.optimize.Bounds): Optimization bounds for alphas. Useful if your track boundary is not 100%
+                                        accurate.
     """
 
-    def __init__(self, track, vehicle=None):
+    def __init__(self, track: Track, vehicle: Vehicle) -> None:
         """Store track and vehicle and initialise a centerline path."""
         self.s = None
         self.velocity = None
@@ -26,21 +40,19 @@ class Trajectory:
         self.angle_long = None
         self.angle_lat = None
         self.track = track
-        self.ns = math.ceil(track.length)
-        self.alphas = np.full(track.size, 0.5)
-        self.sample = range(track.size)
+        self.ns = math.ceil(self.track.length)
+        self.alphas = np.full(self.track.size, 0.5)
         self.update(self.alphas)       # turn alphas into function param & pass on results for max curvature
         self.vehicle = vehicle
+        self.bounds = Bounds(0.0, 1.0)
 
-    def update(self, alphas):
+    def update(self, alphas: np.ndarray) -> None:
         """Update control points and the resulting path."""
         self.alphas = alphas
-        self.path = Path(self.track.control_points(alphas, self.sample), self.track.closed)
-        # Sample every metre
+        self.path = Path(self.track.control_points(alphas), closed=self.track.closed)
         self.s = np.linspace(0, self.path.length, self.ns)
-        # self.s = np.linspace(0, self.path.length, math.ceil(self.track.size))
 
-    def update_angles(self, s=None):
+    def update_angles(self, s: np.ndarray = None) -> None:
         """Compute track angle (lateral and longitudinal) as well as road camber directionality"""
         if s is None:
             s = self.s
@@ -48,21 +60,19 @@ class Trajectory:
         self.angle_long = compute_long_angle(pos)
         self.angle_lat = self.track.compute_lat_angle(s)
 
-    def update_velocity(self):
+    def update_velocity(self) -> None:
         """Generate a new velocity profile for the current path."""
         s = self.s[:-1]
-        # s = self.s[self.sample]
-        # s = s[:-1]
         s_max = self.path.length if self.track.closed else None
         k = self.path.curvature(s)
         self.update_angles(s)
         self.velocity = VelocityProfile(self.vehicle, s, k, s_max, self.angle_lat, self.angle_long)
 
-    def lap_time(self):
+    def lap_time(self) -> np.array:
         """Calculate lap time from the velocity profile."""
         return np.sum(np.diff(self.s) / self.velocity.v)
 
-    def minimise_curvature(self):
+    def minimise_curvature(self) -> float:
         """Generate a path minimising curvature."""
         def objfun(alphas):
             self.update(alphas)
@@ -73,18 +83,25 @@ class Trajectory:
             fun=objfun,
             x0=np.full(self.track.size, 0.5),
             method='L-BFGS-B',
-            bounds=Bounds(0.0, 1.0) # ,
-            # options={'maxfun': 1000000, 'maxiter': 1000000, 'gtol': 1e-09}
+            bounds=self.bounds
         )
         self.update(res.x)
         return time.time() - t0
 
-    def minimise_curvature_alphas(self, guess, sample=None, opt=None):
-        """Generate a path minimising curvature."""
-        if sample is not None:
-            self.sample = sample
+    def minimise_curvature_alphas(self, guess: np.ndarray, opt: dict = None) -> float:
+        """
+        Generate a path minimising curvature.
+
+        Allows for user to define the initial guess and options. Some options are listed for convenience.
+        """
+
         if opt is None:
-            opt = {'maxcor': 150, 'maxfun': 3000000, 'maxiter': 3000000, 'gtol': 1e-15, 'maxls': 300, 'ftol': 1e-14}
+            # opt = {'maxcor': 50, 'maxfun': 100000, 'maxiter': 100000, 'gtol': 1e-13, 'maxls': 100, 'ftol': 1e-12}
+            # opt = {'maxcor': 100, 'maxfun': 300000, 'maxiter': 300000, 'gtol': 3e-14, 'maxls': 150, 'ftol': 3e-13}
+            # opt = {'maxcor': 150, 'maxfun': 1000000, 'maxiter': 1000000, 'gtol': 1e-14, 'maxls': 300, 'ftol': 1e-13}
+            # opt = {'maxcor': 150, 'maxfun': 1000000, 'maxiter': 1000000, 'gtol': 3e-15, 'maxls': 300, 'ftol': 3e-14}
+            # opt = {'maxcor': 250, 'maxfun': 3000000, 'maxiter': 3000000, 'gtol': 1e-15, 'maxls': 500, 'ftol': 1e-14}
+            opt = {'maxcor': 500, 'maxfun': 10000000, 'maxiter': 10000000, 'gtol': 1e-17, 'maxls': 1000, 'ftol': 1e-16}
 
         s = self.s
 
@@ -95,10 +112,9 @@ class Trajectory:
         t0 = time.time()
         res = minimize(
             fun=objfun,
-            x0=guess[sample],
+            x0=guess,
             method='L-BFGS-B',
-            # bounds=Bounds(0.0, 1.0),
-            bounds=Bounds(0.05, 0.95),
+            bounds=self.bounds,
             options=opt
         )
         self.update(res.x)
@@ -106,11 +122,9 @@ class Trajectory:
         # update alphas with full track length
         return time.time() - t0
 
-    def minimise_compromise(self, eps):
-        """
-        Generate a path minimising a compromise between path curvature and path
-        length. eps gives the weight for path length.
-        """
+    def minimise_compromise(self, eps) -> float:
+        """Generate a path minimising a compromise between path curvature and path length. eps gives the weight for
+        path length."""
 
         def objfun(alphas):
             self.update(alphas)
@@ -123,17 +137,14 @@ class Trajectory:
             fun=objfun,
             x0=np.full(self.track.size, 0.5),
             method='L-BFGS-B',
-            bounds=Bounds(0.0, 1.0),
+            bounds=self.bounds,
             options={'maxfun': 10000000, 'maxiter': 10000000, 'gtol': 1e-11}
         )
         self.update(res.x)
         return time.time() - t0
 
-    def minimise_optimal_compromise(self, eps_min=0, eps_max=0.2):
-        """
-        Determine the optimal compromise weight when using optimise_compromise to
-        produce a path.
-        """
+    def minimise_optimal_compromise(self, eps_min=0, eps_max=0.2) -> float:
+        """Determine the optimal compromise weight when using optimise_compromise to produce a path."""
 
         def objfun(eps):
             self.minimise_compromise(eps)
@@ -158,14 +169,11 @@ class Trajectory:
         end = time.time()
         return end - t0
 
-    def minimise_lap_time(self):
-        """
-        Generate a path that directly minimises lap time.
-        """
+    def minimise_lap_time(self) -> float:
+        """Generate a path that directly minimises lap time. Much slower compared to minimizing curvature."""
 
         def objfun(alphas):
             self.update(alphas)
-            self.update_angles()
             self.update_velocity()
             return self.lap_time()
 
@@ -174,16 +182,41 @@ class Trajectory:
             fun=objfun,
             x0=np.full(self.track.size, 0.5),
             method='L-BFGS-B',
-            bounds=Bounds(0.0, 1.0) # ,
-            # options={'maxfun': 100000000, 'maxiter': 100000000, 'gtol': 1e-17, 'ftol': 1e-12}
+            bounds=self.bounds
         )
         self.update(res.x)
         return time.time() - t0
 
-    # def optimise_sectors(self, k_min, proximity, length):
+    def minimise_lap_time_alphas(self, guess, opt=None) -> float:
+        """
+        Generate a path that directly minimises lap time. Much slower compared to minimizing curvature.
+
+        Allows for user to define the initial guess and options.
+        """
+
+        if opt is None:
+            opt = {}
+            # opt = {'maxfun': 100000, 'maxiter': 1000000, 'gtol': 1e-14, 'ftol': 1e-12}
+
+        def objfun(alphas):
+            self.update(alphas)
+            self.update_velocity()
+            return self.lap_time()
+
+        t0 = time.time()
+        res = minimize(
+            fun=objfun,
+            x0=guess,
+            method='L-BFGS-B',
+            bounds=self.bounds,
+            options=opt
+        )
+        self.update(res.x)
+        return time.time() - t0
+
+    # def optimise_sectors(self, k_min, proximity, length) -> float:
     #     """
-    #     Generate a path that optimises the path through each sector, and merges
-    #     the results along intervening straights.
+    #     Generate a path that optimises the path through each sector, and merges the results along intervening straights.
     #     """
     #
     #     # Define sectors
@@ -204,10 +237,9 @@ class Trajectory:
     #     self.update(alphas)
     #     return time.time() - t0
     #
-    # def optimise_sector_compromise(self, i, corners, traj):
+    # def optimise_sector_compromise(self, i, corners, traj) -> np.ndarray:
     #     """
-    #     Builds a new Track for the given corner sequence, and optimises the path
-    #     through it by the compromise method.
+    #     Builds a new Track for the given corner sequence, and optimises the path through it by the compromise method.
     #     """
     #
     #     # Represent sector as new Track
@@ -245,5 +277,3 @@ class Trajectory:
     #     return alphas
 
 ###############################################################################
-
-
