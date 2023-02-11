@@ -16,3 +16,6 @@ Python code to interact with Assetto Corsa app [AI Driver](https://github.com/je
 * Navigate out of pit lane
 * Brake modulation to account for loss of total grip available due to load transfer
 * Allow for loading of previously computed optimal lines in the optimization process
+
+## Acknowledgements
+This repository is based on https://github.com/joedavison17/dissertation
