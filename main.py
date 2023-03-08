@@ -14,6 +14,7 @@ from control import Controller
 from path import cumulative_distances
 from trajectory import Trajectory
 from socket_class import ACSocket
+from replay import Replay
 import ac_utils as ac
 
 
@@ -141,6 +142,9 @@ def main():
 
         trajectory.update_velocity()
         cont = Controller(trajectory=trajectory)
+        rep = Replay()
+        # df = rep.load(os.path.join(track.dir_name, 'replay.csv'))
+        # print(df)
 
         # initialize the WindowCapture class
         # win_cap = WindowCapture("Assetto Corsa")      # not needed currently
@@ -166,8 +170,10 @@ def main():
                     sock.update()
                     vehicle.update(sock.data)  # pass on data from socket to update car's current state
                     cont.update_target(vehicle)     # compute target controls and update gamepad
+                    rep.update(vehicle)
                 except:
                     sock.on_close()
+                    rep.save(os.path.join(track.dir_name, 'replay.csv'))
                     break
 
                 # # press 'q' with the output window focused to exit. Waits 1 ms every loop to process key presses

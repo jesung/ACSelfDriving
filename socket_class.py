@@ -44,7 +44,6 @@ class ACSocket:
         try:
             self.data = self.conn.recv(1024)
             # print(f"Received: {self.data}")
-            # self.conn.sendall(self.data)
         except:
             print("Didn't receive data")
             self.on_close()

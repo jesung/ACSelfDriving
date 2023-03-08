@@ -13,15 +13,20 @@ class Vehicle:
     Attributes:
         location (tuple): XYZ
         speed (float): current speed of vehicle (m/s)
-        heading (float) current heading of vehicle
+        position (float): position of the car on the track in normalized [0,1]
         mass (float): mass of the vehicle in kg
         engine_profile (np.ndarray): mapping of vehicle speed (m/s) to wheel force (N)
         tire_coefficient (float): coefficient of friction of the driven wheel
     """
 
     location = [0.0, 0.0, 0.0]
-    speed = 0.0
     heading = 0.0
+    speed = 0.0
+    position = 0.0
+    lap_time = 0
+    throttle = 0.0
+    brake = 0.0
+    steer = 0.0
 
     def __init__(self, name: str) -> None:
         self.mass, self.tire_coefficient, self.engine_profile = ac.load_vehicle(name)
@@ -29,12 +34,12 @@ class Vehicle:
 
     def __repr__(self) -> str:
         """Overwrites print(vehicle) function."""
-        return f"[X, Y, Z]: {self.location} \tHeading: {self.heading} \tSpeed: {self.speed}"
+        return f"[X, Y, Z]: {self.location}\tHeading: {self.heading}  \tSpeed: {self.speed} \tPosition: {self.position}"
 
     def update(self, socket_data: bytes) -> None:
         # cutting off at five columns allows for overflow of data
-        x, y, z, self.heading, self.speed = [float(i) if i != '' else 0 for i in
-                                             socket_data.decode('utf8').split(',')[:5]]
+        x, y, z, self.heading, self.speed, self.position, self.lap_time, self.throttle, self.brake, self.steer = \
+            [float(i) if i != '' else 0 for i in socket_data.decode('utf8').split(',')[:10]]
 
         # update location with flipped z-axis. Not sure why Kunos uses such odd axes between game and track map.
         self.location = np.array([x, y, -z])
