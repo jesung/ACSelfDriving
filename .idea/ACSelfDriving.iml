@@ -4,7 +4,10 @@
     <content url="file://$USER_HOME$/AppData/Local/Tesseract-OCR" />
     <content url="file://$MODULE_DIR$/../../Games/SteamLibrary/steamapps/common/assettocorsa/apps/python/selfdriving" />
     <content url="file://$MODULE_DIR$" />
-    <orderEntry type="inheritedJdk" />
+    <orderEntry type="jdk" jdkName="ACSelfDriving2" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+  <component name="PackageRequirementsSettings">
+    <option name="removeUnused" value="true" />
   </component>
 </module>
