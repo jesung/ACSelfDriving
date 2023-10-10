@@ -6,4 +6,4 @@ pandas~=1.5.2
 dash~=2.8.1
 opencv-python~=4.6.0.66
 mss==7.0.1
-pillow~=9.4.0
+pillow~=10.0.1
