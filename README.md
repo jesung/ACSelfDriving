@@ -23,7 +23,7 @@ Python code to interact with Assetto Corsa app [AI Driver](https://github.com/je
 							<li>Rename side_l.csv in the game installation directory to right.csv</li>
 							<li>Copy into the content/tracks/track_name folder under the AC Self Driving repo below</li>
 						</ul>
-					<li>(optional) If the car you want is not available (<a href="https://www.youtube.com/watch?v=H-Fji4-boME&ab_channel=UnleashedDrivers" target="_blank">YouTube instructions</a>></li>
+					<li>(optional) If the car you want is not available (<a href="https://www.youtube.com/watch?v=H-Fji4-boME&ab_channel=UnleashedDrivers" target="_blank">YouTube instructions</a>)</li>
 						<ul>
 							<li>Open Content Manager and go to the About section</li>
 							<li>Click "Version" multiple times to enable developer mode</li>
