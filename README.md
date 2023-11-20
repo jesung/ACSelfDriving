@@ -4,6 +4,7 @@ Python code to interact with Assetto Corsa app [AI Driver](https://github.com/je
 1. Compute optimized racing line by minimizing curvature or lap time
 2. Take the computed racing line and drive a car within the game Assetto Corsa
 
+[Detailed write-up](https://jesungpark.com/projects/sdrc1.html) and [results visualization](https://jesungpark.com/projects/sdrc2.html) are on my blog.
 
 ## How to get started
 <ul>
